@@ -1,11 +1,11 @@
-> Copied from the working copy of `acorn-swap/docs/QRVM.md` on 2026-10-28 (not yet committed
+> Copied from the working copy of `pauli-swap/docs/QRVM.md` on 2026-10-28 (not yet committed
 > upstream; PhuocNG0308/acorn-swap HEAD is `a7bd1fe`).
-> The acorn-swap copy is canonical; re-copy it when it changes. Paths below
+> The pauli-swap copy is canonical; re-copy it when it changes. Paths below
 > (`contracts-qrvm/`, `scripts/qrvm/lib.js`, `docs/AUDIT.md`, …) refer to that repo.
 
-# AcornSwap on QRVM — port to QIP-55 (64 byte addresses, 512 bit words)
+# PauliSwap on QRVM — port to QIP-55 (64 byte addresses, 512 bit words)
 
-Scope: the second build line of AcornSwap, for QRL networks that run QIP-55
+Scope: the second build line of PauliSwap, for QRL networks that run QIP-55
 ("testnet v3"): 64 byte addresses rendered `Q` + 128 hex, and a VM whose stack
 word is 512 bits. The 20 byte line that is live on testnet v2 (`docs/AUDIT.md`)
 is untouched: same sources, same `PAIR_INIT_CODE_HASH`, same 107 tests.
@@ -56,7 +56,7 @@ source at that commit.
 
 Upstream computes a pair or pool address in place from the CREATE2 formula. On
 QIP-55 that formula is Keccak-512 over a domain tag, which no contract can
-evaluate. `AcornV2Library.pairFor` and `PoolAddress.computeAddress` therefore
+evaluate. `PauliV2Library.pairFor` and `PoolAddress.computeAddress` therefore
 read `factory.getPair` / `factory.getPool`. Both became `view`.
 
 - A missing pair or pool yields `address(0)`. Every caller then makes a call
@@ -68,9 +68,9 @@ read `factory.getPair` / `factory.getPool`. Both became `view`.
 - `PAIR_INIT_CODE_HASH` and `POOL_INIT_CODE_HASH` no longer exist on this line,
   so nothing pins the optimizer settings of the core.
 - Off chain code derives addresses with `create2Address` in
-  `scripts/qrvm/lib.js`, from `AcornV2Factory.pairCodeHash()` (salt
+  `scripts/qrvm/lib.js`, from `PauliV2Factory.pairCodeHash()` (salt
   `keccak256(token0 ‖ token1)`, 64 byte addresses) and
-  `AcornV3Factory.poolCodeHash()` (salt `keccak256(abi.encode(token0, token1,
+  `PauliV3Factory.poolCodeHash()` (salt `keccak256(abi.encode(token0, token1,
   fee))`, 64 byte words). The audit asserts both against live deployments.
 - Cost: one external call per hop, about 2.6k gas on a cold factory.
 
@@ -86,10 +86,10 @@ name and signature, so the ABI does not change:
 
 | Contract | Mapping |
 | --- | --- |
-| `AcornV2SQRCTF1` (and so `AcornV2Pair`), `WQRL`, `DeflatingSQRCTF1` | `balanceOf`, `allowance` |
-| `AcornV2Factory` | `getPair` |
-| `AcornV3Factory` | `getPool` |
-| `AcornV3Pool` | `ticks`, `tickBitmap`, `positions` |
+| `PauliV2SQRCTF1` (and so `PauliV2Pair`), `WQRL`, `DeflatingSQRCTF1` | `balanceOf`, `allowance` |
+| `PauliV2Factory` | `getPair` |
+| `PauliV3Factory` | `getPool` |
+| `PauliV3Pool` | `ticks`, `tickBitmap`, `positions` |
 
 `feeAmountTickSpacing` (`uint24` key) and `observations` (array) are correct as
 generated and stay public.
@@ -118,13 +118,13 @@ revert conditions. `mulDivRoundingUp` is unchanged.
 
 | Site | Upstream | QRVM |
 | --- | --- | --- |
-| `AcornV2Factory.createPair` | assembly `create2(0, add(bytecode, 32), …)` | `new AcornV2Pair{salt}()`; a failed creation reverts rather than returning zero, so `CREATE2_FAILED` cannot occur |
+| `PauliV2Factory.createPair` | assembly `create2(0, add(bytecode, 32), …)` | `new PauliV2Pair{salt}()`; a failed creation reverts rather than returning zero, so `CREATE2_FAILED` cannot occur |
 | `BytesLib.slice` | 32 byte copy loop, masks `31`, pointer at `0x40` | 64 byte loop, masks `63`, pointer at `0x80` |
 | `BytesLib.toAddress` | 20 bytes, shifted down 12 | 64 bytes, a whole word |
 | `Path` | `ADDR_SIZE = 20` | `ADDR_SIZE = 64`: a hop is 67 bytes, a two pool path 198 |
 | `Quoter` callback | `mload(0x40)`, `revert(ptr, 32)` | `mload(0x80)`, `revert(ptr, 64)`. Upstream's version reverts with the top half of a scratch word, so every quote would fail to decode |
 | `Quoter.parseRevertReason`, `Multicall` | lengths `32`, `68` | `64`, `132` (`4 + 64 + 64`) |
-| `AcornV3Pool.balance0/1` | `data.length >= 32` | `>= 64` |
+| `PauliV3Pool.balance0/1` | `data.length >= 32` | `>= 64` |
 
 `BytesLib.toUint24` is unchanged: the word it loads ends at data offset
 `_start + 3` for any word size, because the length prefix is one word long.
@@ -149,13 +149,13 @@ string of the pool identical:
    `observeSingle` and `observe` are `public`, so the pool reaches them by
    DELEGATECALL. Logic and storage layout are unchanged. The deploy script links
    the 64 byte placeholders.
-2. **`snapshotCumulativesInside` moved to `AcornV3PoolLens`**, which recomputes
+2. **`snapshotCumulativesInside` moved to `PauliV3PoolLens`**, which recomputes
    it from `ticks()`, `slot0()` and `observe([0])` in the same block, with
    upstream's checks and reasons (`TLU`, `TLM`, `TUM`, bare revert on an
    uninitialized tick). Integrators call
    `lens.snapshotCumulativesInside(pool, lower, upper)`.
 3. **Split code pool factory.** Even at 24,459 bytes the pool's init code
-   cannot sit inline in any contract's runtime. `AcornV3PoolDeployer` keeps it
+   cannot sit inline in any contract's runtime. `PauliV3PoolDeployer` keeps it
    as the runtime code of two chunk contracts, each prefixed with a STOP byte,
    and reassembles it with `EXTCODECOPY` before every CREATE2. This is the
    pattern of Balancer V2's `BaseSplitCodeFactory`. The factory exposes
@@ -195,12 +195,12 @@ The contract sources are the same on both lines; nothing about the position
 manager is overlaid. Two things in the dependency are still 256 bit code,
 found by reading `main` and confirmed on chain where it matters:
 
-| Site in qrl-contracts `main` | Effect on QRVM | Reaches AcornSwap? |
+| Site in qrl-contracts `main` | Effect on QRVM | Reaches PauliSwap? |
 | --- | --- | --- |
 | `SQRCTN1Utils.checkOnSQRCTN1Received` bubbles a receiver's revert with `revert(add(32, reason), mload(reason))` | The transfer still reverts and ownership is unchanged, but the reason is garbled: a receiver rejecting with `"Receiver rejects"` surfaces as 4 zero bytes (`<error 0x00000000>`) | Yes, on `safeTransferFrom` to a contract that rejects. Diagnostics only |
 | `Strings.toString` writes digits from `add(buffer, add(32, length))` | Would write into the length word, not the data | No: `SQRCTN1.tokenURI` is overridden and nothing else calls it |
 
-The descriptor (`AcornV3PositionDescriptor`) replaces upstream's SVG renderer,
+The descriptor (`PauliV3PositionDescriptor`) replaces upstream's SVG renderer,
 whose `NFTSVG`/`Base64` helpers are assembly written for 32 byte words. It has
 no assembly, so the same source is correct at either word size, and it writes
 addresses from `abi.encodePacked`, which gives 40 hex digits on one line and
@@ -217,7 +217,7 @@ Sizes (runtime / init): `NonfungiblePositionManager` 19,412 / 20,159 on QRVM,
 | --- | --- | --- |
 | Testnet line unaffected | `npm test` | 107 passing, `PAIR_INIT_CODE_HASH` unchanged |
 | ABI compatibility and OC-V3-02 lint | `npm run check:qrvm` | passes; flags the three pool mappings on the unported sources |
-| Math libraries | `npm run diff:qrvm`: 1,128 vectors (extreme ticks and prices, mulDiv overflow edges, wide random operands) through `TickMathProbe` and `AcornV2LibraryProbe` on both builds | 0 mismatches, including all 33 mulDiv overflow reverts |
+| Math libraries | `npm run diff:qrvm`: 1,128 vectors (extreme ticks and prices, mulDiv overflow edges, wide random operands) through `TickMathProbe` and `PauliV2LibraryProbe` on both builds | 0 mismatches, including all 33 mulDiv overflow reverts |
 | End to end | `npm run audit:qrvm`: one scenario on both builds, compared value by value | 105/105 values identical, 68/68 invariant checks, including the position NFT, descriptor, TickLens and V3Migrator leg (`onchain/local-qrvm.json`) |
 
 The devnet run and its numbers are in `docs/ONCHAIN-AUDIT.md`.
@@ -233,7 +233,7 @@ npm run compile:qrvm
 npm run check:qrvm
 
 # local QIP-55 chain for iteration
-docker run -d --name acorn-qrvm-dev -p 127.0.0.1:8547:8545 gqrl:local --dev --dev.period 0 \
+docker run -d --name pauli-qrvm-dev -p 127.0.0.1:8547:8545 gqrl:local --dev --dev.period 0 \
   --dev.gaslimit 60000000 --rpc.txfeecap 0 --http --http.addr 0.0.0.0 --http.api qrl,net,web3
 # .env.local-qrvm: QRL_RPC_URL=http://127.0.0.1:8547, QRVM_NETWORK=local-qrvm, DEPLOYER_MNEMONIC=…
 
@@ -259,6 +259,6 @@ the testnet `.env`, whose `QRL_RPC_URL` is the public 20 byte testnet.
 - The lens matches upstream by construction and is exercised on chain, but no
   upstream test of `snapshotCumulativesInside` was replayed against it.
 - A public QIP-55 testnet behind the wallet proxy would cap requests at about
-  18 KB of init code. On this line `AcornV2Router02` (18,033) is just over
-  that and `AcornV2Factory` (17,942) just under; the devnet is reached
+  18 KB of init code. On this line `PauliV2Router02` (18,033) is just over
+  that and `PauliV2Factory` (17,942) just under; the devnet is reached
   directly, so neither was tested through such a proxy.

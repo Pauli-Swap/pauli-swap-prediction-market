@@ -1,0 +1,22 @@
+{
+  "name": "pauli-swap-prediction-market",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PauliSwap Predict: event XP and Yes / No markets for the QRL QIP-55 devnet",
+  "license": "GPL-2.0-or-later",
+  "scripts": {
+    "compile:qrvm": "node scripts/compile.js",
+    "check:qrvm": "node scripts/compile.js && node scripts/qrvm/check.js",
+    "deploy:qrvm": "node scripts/qrvm/deploy.js",
+    "test:qrvm": "node scripts/qrvm/e2e.js",
+    "gen:wallet": "node scripts/qrvm/gen-wallet.js",
+    "faucet:deploy": "node scripts/qrvm/faucet-deploy.js",
+    "faucet": "node scripts/qrvm/faucet-server.js",
+    "attester": "node scripts/qrvm/attester.js"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.5",
+    "qrl-wallet-qip55": "npm:@theqrl/wallet.js@6.3.0",
+    "qrl-web3-qip55": "npm:@theqrl/web3@1.0.3"
+  }
+}

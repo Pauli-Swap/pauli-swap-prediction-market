@@ -1,7 +1,7 @@
-# AcornSwap Predict — product rules
+# PauliSwap Predict — product rules
 
 Status: product rules for the Prediction Market ("Predict") feature of
-AcornSwap. Nothing is built: no contracts, no indexer handlers, no interface
+PauliSwap. Nothing is built: no contracts, no indexer handlers, no interface
 pages. The Figma screens exist (`docs/DESIGN.md`).
 
 The rules are split into what the product owner decided and what the design
@@ -16,7 +16,7 @@ with the product owner before it reaches a contract.
 
 - A wallet joins prediction markets with **XP**. QRL and tokens are never staked
   on a prediction.
-- XP is earned from **daily quests** that involve using AcornSwap: swap, add
+- XP is earned from **daily quests** that involve using PauliSwap: swap, add
   liquidity, wrap, predict, and similar actions.
 - Quests **reset daily**.
 - Every amount in Predict is shown in XP units.
@@ -66,13 +66,26 @@ a yes from the product owner before contract work depends on it.
 
 ## 3. Open questions
 
-None of these has an answer yet. They decide the contract design.
+### Decided 2026-10-28
+
+The build plan (`docs/PLAN.md`) rests on these answers:
+
+| Question | Answer |
+| --- | --- |
+| Where XP lives | On-chain contract (`PauliPredictXP`), non-transferable; an attester bot credits quests the indexer detects |
+| Pricing | AMM: a binary fixed product market maker |
+| Ranking | XP held: quest XP can be staked, so a wallet can lose it all or win a lot |
+| Market creation and resolution | Admin / multisig |
+
+Still open below: leaderboard period, prize delivery, sybil resistance.
+
+### Original list
 
 - **Where XP lives.** An on-chain balance (non-transferable token or a
   contract ledger) or an off-chain ledger computed by the indexer from
-  AcornSwap events. Quests reward actions on other contracts (swap, add
+  PauliSwap events. Quests reward actions on other contracts (swap, add
   liquidity, wrap), so someone must observe those actions: an on-chain hook in
-  AcornSwap, a trusted attester that writes completions, or the indexer.
+  PauliSwap, a trusted attester that writes completions, or the indexer.
 - **Transferability.** Whether XP can move between wallets. If it can, one
   person can farm quests on many wallets and pool the XP.
 - **Pricing of outcome shares.** Fixed-price shares, a pari-mutuel pool, or an

@@ -1,0 +1,9 @@
+node_modules/
+build/
+.env
+.env.*
+!.env.devnet.example
+!.env.local-qrvm.example
+deployments/local-qrvm.json
+data/
+quests/hidden.json

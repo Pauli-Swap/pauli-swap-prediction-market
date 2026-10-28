@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "notes": "Quest catalogue for PauliSwap Predict. id 0 is PauliPredictXP.checkIn (on chain); every other id is credited by scripts/qrvm/attester.js through creditQuest. kind daily resets at 00:00 UTC; kind season is credited once per season. rule names are evaluated by pauli-swap-indexer/src/quests.ts; min is in QRL for swap / lp / wrap rules and in XP for predict rules. A day rule counts UTC days on which its inner rule was met; the days need not be consecutive.",
+  "quests": [
+    { "id": 0, "kind": "daily", "rule": "check_in", "target": 1, "xp": 10, "action": "checkin", "title": "Daily check-in", "detail": "Check in once a day with your wallet connected" },
+    { "id": 1, "kind": "daily", "rule": "swap", "target": 1, "min": 1, "xp": 30, "action": "swap", "title": "Make a swap", "detail": "Swap at least 1 QRL in value on a priced pool" },
+    { "id": 2, "kind": "daily", "rule": "predict_buy", "target": 1, "min": 10, "xp": 20, "action": "predict", "title": "Make a prediction", "detail": "Stake at least 10 XP on any open market" },
+
+    { "id": 101, "kind": "season", "rule": "days:check_in", "target": 5, "xp": 50, "action": "checkin", "title": "Check in on 5 days", "detail": "Check in on 5 different days this season" },
+    { "id": 102, "kind": "season", "rule": "days:check_in", "target": 15, "xp": 150, "action": "checkin", "title": "Check in on 15 days", "detail": "Check in on 15 different days this season" },
+    { "id": 103, "kind": "season", "rule": "days:swap", "target": 5, "min": 1, "xp": 100, "action": "swap", "title": "Swap on 5 days", "detail": "Complete the daily swap quest on 5 different days" },
+    { "id": 104, "kind": "season", "rule": "days:swap", "target": 15, "min": 1, "xp": 250, "action": "swap", "title": "Swap on 15 days", "detail": "Complete the daily swap quest on 15 different days" },
+    { "id": 105, "kind": "season", "rule": "days:predict_buy", "target": 5, "min": 10, "xp": 100, "action": "predict", "title": "Predict on 5 days", "detail": "Complete the daily prediction quest on 5 different days" },
+    { "id": 106, "kind": "season", "rule": "days:predict_buy", "target": 15, "min": 10, "xp": 250, "action": "predict", "title": "Predict on 15 days", "detail": "Complete the daily prediction quest on 15 different days" },
+    { "id": 107, "kind": "season", "rule": "lp_net", "target": 1, "min": 10, "xp": 100, "action": "pool", "title": "Provide liquidity", "detail": "Hold at least 10 QRL of net liquidity at the end of a UTC day" },
+    { "id": 108, "kind": "season", "rule": "wrap", "target": 1, "min": 1, "xp": 30, "action": "swap", "title": "Wrap or unwrap QRL", "detail": "Wrap QRL to WQRL or unwrap it, at least 1 QRL" },
+    { "id": 109, "kind": "season", "rule": "predict_markets", "target": 3, "min": 10, "xp": 100, "action": "predict", "title": "Trade 3 markets", "detail": "Stake at least 10 XP on 3 different markets" },
+    { "id": 110, "kind": "season", "rule": "predict_win", "target": 1, "xp": 100, "action": "predict", "title": "Win a market", "detail": "Claim from a market that resolved your way" }
+  ]
+}

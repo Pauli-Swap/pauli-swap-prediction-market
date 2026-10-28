@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+pragma hyperion >=0.0;
+
+import "./interfaces/IPauliPredictXP.hyp";
+
+/// @title Event XP for PauliSwap Predict
+/// @notice Non-transferable XP, kept per season so a new season starts every
+/// wallet at zero. Quest XP is written by an attester account that watches
+/// PauliSwap activity off chain; PredictMarket debits stakes and credits
+/// payouts. A day is a UTC day, `block.timestamp / 1 days`.
+contract PauliPredictXP is IPauliPredictXP {
+    address public owner;
+    address public attester;
+    address public market;
+
+    uint256 public currentSeason;
+    uint256 public override seasonEndsAt;
+
+    /// @notice Most quest XP the attester may credit one wallet in one day.
+    uint256 public dailyQuestCap;
+    /// @notice XP paid by `checkIn`, 0 disables it.
+    uint256 public checkInXp;
+
+    /// @notice questId reserved for `checkIn`; attester quest ids start at 1.
+    uint256 public constant CHECK_IN_QUEST = 0;
+
+    mapping(uint256 => bool) public seasonClosed;
+
+    event OwnerChanged(address indexed owner);
+    event AttesterChanged(address indexed attester);
+    event MarketChanged(address indexed market);
+    event ParamsChanged(uint256 dailyQuestCap, uint256 checkInXp);
+    event SeasonStarted(uint256 indexed season, uint256 endsAt);
+    event SeasonClosed(uint256 indexed season, uint256 snapshotBlock, address[3] winners);
+    event XPCredited(address indexed user, uint256 indexed season, uint256 amount, bytes32 reason);
+    event XPDebited(address indexed user, uint256 indexed season, uint256 amount, bytes32 reason);
+    event QuestCompleted(address indexed user, uint256 indexed questId, uint256 day, uint256 amount);
+
+    // QRVM: mappings keyed by address or bytes32 stay private behind explicit
+    // views; hypc's generated getter reads the wrong slot (OC-V3-02, docs/QRVM.md).
+    mapping(uint256 => mapping(address => uint256)) private _balance;
+    mapping(bytes32 => bool) private _questDone;
+    mapping(bytes32 => uint256) private _questXpOnDay;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "XP: owner");
+        _;
+    }
+
+    constructor(uint256 dailyQuestCap_, uint256 checkInXp_) {
+        owner = msg.sender;
+        dailyQuestCap = dailyQuestCap_;
+        checkInXp = checkInXp_;
+        emit OwnerChanged(msg.sender);
+        emit ParamsChanged(dailyQuestCap_, checkInXp_);
+    }
+
+    function xpOf(address user) external view returns (uint256) {
+        return _balance[currentSeason][user];
+    }
+
+    function xpOfSeason(uint256 season, address user) external view returns (uint256) {
+        return _balance[season][user];
+    }
+
+    function questDone(address user, uint256 questId, uint256 day) external view returns (bool) {
+        return _questDone[_questKey(user, questId, day)];
+    }
+
+    function questXpOnDay(address user, uint256 day) external view returns (uint256) {
+        return _questXpOnDay[_dayKey(user, day)];
+    }
+
+    function today() public view returns (uint256) {
+        return block.timestamp / 1 days;
+    }
+
+    function seasonActive() public view returns (bool) {
+        return currentSeason != 0 && block.timestamp < seasonEndsAt;
+    }
+
+    /// @notice Credits a completed quest. `day` may be today or yesterday so a
+    /// completion seen just before midnight UTC can still be written after it.
+    function creditQuest(address user, uint256 questId, uint256 day, uint256 amount) external {
+        require(msg.sender == attester, "XP: attester");
+        require(questId != CHECK_IN_QUEST, "XP: quest id");
+        uint256 t = today();
+        require(day == t || day + 1 == t, "XP: day");
+        _completeQuest(user, questId, day, amount);
+
+        bytes32 dayKey = _dayKey(user, day);
+        uint256 total = _questXpOnDay[dayKey] + amount;
+        require(total <= dailyQuestCap, "XP: daily cap");
+        _questXpOnDay[dayKey] = total;
+    }
+
+    function checkIn() external {
+        require(checkInXp != 0, "XP: no check-in");
+        _completeQuest(msg.sender, CHECK_IN_QUEST, today(), checkInXp);
+    }
+
+    function debit(address user, uint256 amount, bytes32 reason) external override {
+        require(msg.sender == market, "XP: market");
+        uint256 season = currentSeason;
+        uint256 balance = _balance[season][user];
+        require(balance >= amount, "XP: balance");
+        _balance[season][user] = balance - amount;
+        emit XPDebited(user, season, amount, reason);
+    }
+
+    /// @dev Not gated on `seasonActive`: winnings claimed after a season ends
+    /// but before the next starts still belong to that season.
+    function credit(address user, uint256 amount, bytes32 reason) external override {
+        require(msg.sender == market, "XP: market");
+        _credit(user, amount, reason);
+    }
+
+    /// @dev The previous season must be closed first: `credit` writes to the
+    /// current season, so a late claim would otherwise land in the new one.
+    function startSeason(uint256 endsAt) external onlyOwner {
+        require(block.timestamp >= seasonEndsAt, "XP: season live");
+        require(currentSeason == 0 || seasonClosed[currentSeason], "XP: not closed");
+        require(endsAt > block.timestamp, "XP: ends");
+        uint256 season = currentSeason + 1;
+        currentSeason = season;
+        seasonEndsAt = endsAt;
+        emit SeasonStarted(season, endsAt);
+    }
+
+    /// @notice Records the top 3 that the indexer ranked at `snapshotBlock`.
+    /// Prizes are delivered by hand; this is the public record of who won.
+    /// @dev Call after every market of the season is resolved and claimed;
+    /// `startSeason` refuses to open the next season until this has run.
+    function closeSeason(uint256 snapshotBlock, address[3] calldata winners) external onlyOwner {
+        uint256 season = currentSeason;
+        require(season != 0 && block.timestamp >= seasonEndsAt, "XP: season live");
+        require(!seasonClosed[season], "XP: closed");
+        require(snapshotBlock <= block.number, "XP: snapshot");
+        seasonClosed[season] = true;
+        emit SeasonClosed(season, snapshotBlock, winners);
+    }
+
+    function setOwner(address owner_) external onlyOwner {
+        require(owner_ != address(0), "XP: zero owner");
+        owner = owner_;
+        emit OwnerChanged(owner_);
+    }
+
+    function setAttester(address attester_) external onlyOwner {
+        attester = attester_;
+        emit AttesterChanged(attester_);
+    }
+
+    function setMarket(address market_) external onlyOwner {
+        market = market_;
+        emit MarketChanged(market_);
+    }
+
+    function setParams(uint256 dailyQuestCap_, uint256 checkInXp_) external onlyOwner {
+        dailyQuestCap = dailyQuestCap_;
+        checkInXp = checkInXp_;
+        emit ParamsChanged(dailyQuestCap_, checkInXp_);
+    }
+
+    function _completeQuest(address user, uint256 questId, uint256 day, uint256 amount) private {
+        require(seasonActive(), "XP: no season");
+        require(amount != 0, "XP: amount");
+        bytes32 key = _questKey(user, questId, day);
+        require(!_questDone[key], "XP: done");
+        _questDone[key] = true;
+        emit QuestCompleted(user, questId, day, amount);
+        _credit(user, amount, bytes32(questId));
+    }
+
+    function _credit(address user, uint256 amount, bytes32 reason) private {
+        uint256 season = currentSeason;
+        _balance[season][user] += amount;
+        emit XPCredited(user, season, amount, reason);
+    }
+
+    function _questKey(address user, uint256 questId, uint256 day) private pure returns (bytes32) {
+        return keccak256(abi.encode(user, questId, day));
+    }
+
+    function _dayKey(address user, uint256 day) private pure returns (bytes32) {
+        return keccak256(abi.encode(user, day));
+    }
+}

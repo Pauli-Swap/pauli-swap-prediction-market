@@ -1,0 +1,8 @@
+{
+  "notes": "Wallets refused by the faucet service and the attester, and dropped from the season ranking. Edit by hand after a sybil review; both services re-read it on every use. Infrastructure wallets are listed so bots never earn quest XP.",
+  "wallets": [
+    "Q11CbF00fd1F343e909836f108Fc74795D09a5d3A470d493536B2075ee3FA130c45379f34CE8198D7A3BAE49Ac4A413929574018ccE45f000840599dF7d133e35",
+    "Qa1A64D6E760C3f3213771Aa45189126d6afeB5f26F6E6e9844ed42B2c7D388c009Ef9a59CcBD9D8cDcF27CBAf7eC0057cf4A75D61434C323a428A01a2a9234Ca",
+    "Q9F93eb3131F3757De3d1a8eC540D7b2AE505a630a25892d923D0751af06B7c80Bf59a32f040503c3e45A95b0F8Ae8f88722813CD97A93FfC7890a01c7C91B94f"
+  ]
+}

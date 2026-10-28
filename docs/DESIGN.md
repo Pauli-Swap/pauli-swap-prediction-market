@@ -1,8 +1,8 @@
-# AcornSwap Predict — design reference
+# PauliSwap Predict — design reference
 
 ## Figma
 
-File: AcornSwap Interface,
+File: PauliSwap Interface,
 <https://www.figma.com/design/oOPY8foOfB8hWept1yzgAC>
 (file key `oOPY8foOfB8hWept1yzgAC`).
 
@@ -25,7 +25,7 @@ components:
 The global header (`88:226`) has a `Nav/Predict` link.
 
 The rest of the file (Cover, Foundations, Components, Swap, Explore, Pool,
-Wallet) is the AcornSwap house style. Predict reuses its components first and
+Wallet) is the PauliSwap house style. Predict reuses its components first and
 only adds the ones above.
 
 ## Design contract
@@ -49,8 +49,8 @@ interface build.
 
 ## Theme
 
-Same as the rest of AcornSwap; the interface already implements it in
-`acorn-swap-interface/src/styles/tokens.css`.
+Same as the rest of PauliSwap; the interface already implements it in
+`pauli-swap-interface/src/styles/tokens.css`.
 
 - **Quantum Color**: obsidian ramp from `#08080a`, quantum blue `#4cc2ff` for
   interaction, QRL orange only on QRL identity marks, alert `#f2777a`.

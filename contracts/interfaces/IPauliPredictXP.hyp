@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+pragma hyperion >=0.0;
+
+/// @notice The part of PauliPredictXP that PredictMarket calls.
+interface IPauliPredictXP {
+    /// @notice Unix time at which the current season stops accepting quest XP.
+    function seasonEndsAt() external view returns (uint256);
+
+    /// @notice Removes `amount` XP from `user` in the current season. Market only.
+    function debit(address user, uint256 amount, bytes32 reason) external;
+
+    /// @notice Adds `amount` XP to `user` in the current season. Market only.
+    function credit(address user, uint256 amount, bytes32 reason) external;
+}

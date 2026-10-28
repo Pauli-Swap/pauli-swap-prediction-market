@@ -1,4 +1,4 @@
-# AcornSwap Predict — integration constraints
+# PauliSwap Predict — integration constraints
 
 What the Predict contracts must look like so that the existing interface and
 the planned indexer can use them without special cases. Each constraint comes
@@ -6,13 +6,13 @@ from a measured property of the QIP-55 devnet; the evidence is in
 `docs/QRVM.md` and in the sibling repos named below.
 
 Target: the private QIP-55 devnet, `chainId` 3151908, the same chain that
-`acorn-swap` V2 + V3 is deployed on (`acorn-swap/deployments/devnet.json`).
+`pauli-swap` V2 + V3 is deployed on (`pauli-swap/deployments/devnet.json`).
 
 ---
 
 ## 1. Toolchain
 
-Build exactly like the QRVM line of `acorn-swap` (`docs/QRVM.md`, "Running it"):
+Build exactly like the QRVM line of `pauli-swap` (`docs/QRVM.md`, "Running it"):
 
 | | |
 | --- | --- |
@@ -22,7 +22,7 @@ Build exactly like the QRVM line of `acorn-swap` (`docs/QRVM.md`, "Running it"):
 | QRC base contracts | `@theqrl/qrl-contracts` at commit `d3c84ee` (npm alias `qrl-contracts-qip55`); the npm 0.1.0 release is 20 byte code (QRVM.md Q7) |
 
 The Docker images are built from `QuantumArk/infra/devnet`. Deploy scripts can
-follow `acorn-swap/scripts/qrvm/lib.js`, including its refusal of non-private
+follow `pauli-swap/scripts/qrvm/lib.js`, including its refusal of non-private
 RPC URLs unless `ALLOW_PUBLIC_RPC=1`.
 
 ## 2. Contract rules (QRVM)
@@ -36,7 +36,7 @@ RPC URLs unless `ALLOW_PUBLIC_RPC=1`.
   bytes, the free memory pointer is at `0x80` (QRVM.md, facts table and Q4).
   Prefer high level code.
 - **No `FullMath.mulDiv` from upstream** (QRVM.md Q3). Use the QRVM version in
-  `acorn-swap/contracts-qrvm` or plain checked arithmetic.
+  `pauli-swap/contracts-qrvm` or plain checked arithmetic.
 - **No CREATE2 address derivation on chain** (QRVM.md Q1). If markets are
   separate contracts, the factory stores and emits their addresses; off-chain
   code reads them from events or a view.
@@ -56,8 +56,8 @@ The interface and indexer read history from logs, not from getters.
 
 - Topics are 64 bytes: topic0 is the keccak256 signature right-padded, indexed
   values left-padded. Both consumers already build such filters by hand and call
-  `qrl_getLogs` directly (`acorn-swap-interface/src/lib/logs.ts`,
-  `acorn-swap-indexer/docs/INDEXER.md` §3.1).
+  `qrl_getLogs` directly (`pauli-swap-interface/src/lib/logs.ts`,
+  `pauli-swap-indexer/docs/INDEXER.md` §3.1).
 - Emit an event for every state change a screen needs to show history for:
   market created / resolved / cancelled, stake placed, claim, XP credited and
   debited, quest completed. Index the market id and the user address.
@@ -70,7 +70,7 @@ The interface and indexer read history from logs, not from getters.
 ## 4. Deployment output
 
 The interface pulls ABIs and addresses with `npm run sync:contracts`
-(`acorn-swap-interface/scripts/sync-contracts.mjs`). It reads:
+(`pauli-swap-interface/scripts/sync-contracts.mjs`). It reads:
 
 - `build/qrvm/index.json`, mapping contract name → `[unit, …]`, and
   `build/qrvm/<unit>/<Name>.json` with an `abi` field;
@@ -78,7 +78,7 @@ The interface pulls ABIs and addresses with `npm run sync:contracts`
   `deployedAt` and a flat `contracts` name → address map.
 
 Produce the same layout here so the script can be pointed at this repo, or
-deploy into `acorn-swap/deployments/devnet.json`'s shape under new keys.
+deploy into `pauli-swap/deployments/devnet.json`'s shape under new keys.
 `startBlock` matters: the indexer and the interface start log scans from it.
 
 The devnet regenerates from genesis on redeploys. Deployment files must change
@@ -87,7 +87,7 @@ the new chain (INDEXER.md §10).
 
 ## 5. Interface side
 
-For whoever builds the Predict pages in `acorn-swap-interface`:
+For whoever builds the Predict pages in `pauli-swap-interface`:
 
 - Reads go through the same-origin `/rpc` proxy; the app never calls the RPC
   endpoint directly (CORS, see the interface README).
@@ -103,9 +103,9 @@ For whoever builds the Predict pages in `acorn-swap-interface`:
 
 ## 6. Indexer side
 
-`acorn-swap-indexer/docs/INDEXER.md` §15 lists Predict as a future handler
+`pauli-swap-indexer/docs/INDEXER.md` §15 lists Predict as a future handler
 module on the same pipeline (XP, quests, leaderboards). If XP is computed
-off chain from AcornSwap activity (`docs/PRODUCT.md` §3), the indexer is
+off chain from PauliSwap activity (`docs/PRODUCT.md` §3), the indexer is
 where quest completion is detected. Its design (not built yet) already ingests
 V2 and V3 `Swap` / `Mint` with the real transaction sender (INDEXER.md §6,
 §7.3), and lists `WQRL` `Deposit` / `Withdrawal` as an optional stat (§8.4);

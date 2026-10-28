@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+pragma hyperion >=0.0;
+
+import "./interfaces/IPauliPredictXP.hyp";
+
+/// @title Yes / No prediction markets priced in XP
+/// @notice Each market is a binary fixed product market maker (Gnosis FPMM):
+/// a Yes reserve and a No reserve whose product never decreases. Buying with
+/// `a` XP mints `a` Yes + `a` No into the reserves and pays out shares of the
+/// chosen outcome; a winning share redeems for 1 XP. Shares are not
+/// transferable. Markets are created, resolved and cancelled by the owner.
+contract PredictMarket {
+    uint8 public constant YES = 0;
+    uint8 public constant NO = 1;
+
+    uint8 public constant OPEN = 0;
+    uint8 public constant RESOLVED = 1;
+    uint8 public constant CANCELLED = 2;
+
+    struct Market {
+        uint256 closeTime;
+        uint256 poolYes;
+        uint256 poolNo;
+        uint8 status;
+        uint8 outcome;
+    }
+
+    struct Position {
+        uint256 yesShares;
+        uint256 noShares;
+        uint256 spent;
+        uint256 received;
+    }
+
+    IPauliPredictXP public immutable predictXP;
+    address public owner;
+
+    Market[] public markets;
+
+    event OwnerChanged(address indexed owner);
+    event MarketCreated(uint256 indexed id, string question, uint256 closeTime, uint256 liquidity);
+    event Bought(uint256 indexed id, address indexed user, uint8 outcome, uint256 xpIn, uint256 shares);
+    event Sold(uint256 indexed id, address indexed user, uint8 outcome, uint256 xpOut, uint256 shares);
+    event MarketResolved(uint256 indexed id, uint8 outcome);
+    event MarketCancelled(uint256 indexed id);
+    event Claimed(uint256 indexed id, address indexed user, uint256 xp);
+
+    // QRVM: private behind `positionOf`, see OC-V3-02 in docs/QRVM.md.
+    mapping(uint256 => mapping(address => Position)) private _positions;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "PM: owner");
+        _;
+    }
+
+    constructor(IPauliPredictXP predictXP_) {
+        predictXP = predictXP_;
+        owner = msg.sender;
+        emit OwnerChanged(msg.sender);
+    }
+
+    function marketCount() external view returns (uint256) {
+        return markets.length;
+    }
+
+    function positionOf(uint256 id, address user)
+        external
+        view
+        returns (uint256 yesShares, uint256 noShares, uint256 spent, uint256 received)
+    {
+        Position storage p = _positions[id][user];
+        return (p.yesShares, p.noShares, p.spent, p.received);
+    }
+
+    /// @notice Price of Yes in 1e18 units; No is 1e18 minus it.
+    function priceYes(uint256 id) external view returns (uint256) {
+        Market storage m = markets[id];
+        return (m.poolNo * 1e18) / (m.poolYes + m.poolNo);
+    }
+
+    function quoteBuy(uint256 id, uint8 outcome, uint256 xpIn) public view returns (uint256 shares) {
+        Market storage m = markets[id];
+        (uint256 buyPool, uint256 otherPool) = outcome == YES ? (m.poolYes, m.poolNo) : (m.poolNo, m.poolYes);
+        // (buyPool + xpIn - shares) * (otherPool + xpIn) >= buyPool * otherPool,
+        // with the division rounded up so the product never decreases.
+        uint256 kept = _divUp(buyPool * otherPool, otherPool + xpIn);
+        return buyPool + xpIn - kept;
+    }
+
+    /// @notice Shares of `outcome` the pool takes back to pay out `xpOut` XP.
+    function quoteSell(uint256 id, uint8 outcome, uint256 xpOut) public view returns (uint256 shares) {
+        Market storage m = markets[id];
+        (uint256 sellPool, uint256 otherPool) = outcome == YES ? (m.poolYes, m.poolNo) : (m.poolNo, m.poolYes);
+        require(xpOut < otherPool, "PM: too much");
+        // (sellPool + shares - xpOut) * (otherPool - xpOut) >= sellPool * otherPool.
+        return _divUp(sellPool * otherPool, otherPool - xpOut) + xpOut - sellPool;
+    }
+
+    /// @notice Opens a market seeded with `liquidity` Yes and `liquidity` No.
+    /// The seed is not debited from anyone: it is the most XP the market can
+    /// mint beyond what traders put in.
+    function createMarket(string calldata question, uint256 closeTime, uint256 liquidity)
+        external
+        onlyOwner
+        returns (uint256 id)
+    {
+        require(closeTime > block.timestamp, "PM: close");
+        require(closeTime <= predictXP.seasonEndsAt(), "PM: past season");
+        require(liquidity != 0, "PM: liquidity");
+        id = markets.length;
+        markets.push(Market(closeTime, liquidity, liquidity, OPEN, 0));
+        emit MarketCreated(id, question, closeTime, liquidity);
+    }
+
+    function buy(uint256 id, uint8 outcome, uint256 xpIn, uint256 minShares) external returns (uint256 shares) {
+        Market storage m = _tradable(id, outcome);
+        require(xpIn != 0, "PM: amount");
+        shares = quoteBuy(id, outcome, xpIn);
+        require(shares >= minShares, "PM: slippage");
+
+        predictXP.debit(msg.sender, xpIn, bytes32(id));
+        Position storage p = _positions[id][msg.sender];
+        p.spent += xpIn;
+        if (outcome == YES) {
+            m.poolYes = m.poolYes + xpIn - shares;
+            m.poolNo += xpIn;
+            p.yesShares += shares;
+        } else {
+            m.poolNo = m.poolNo + xpIn - shares;
+            m.poolYes += xpIn;
+            p.noShares += shares;
+        }
+        emit Bought(id, msg.sender, outcome, xpIn, shares);
+    }
+
+    function sell(uint256 id, uint8 outcome, uint256 xpOut, uint256 maxShares) external returns (uint256 shares) {
+        Market storage m = _tradable(id, outcome);
+        require(xpOut != 0, "PM: amount");
+        shares = quoteSell(id, outcome, xpOut);
+        require(shares <= maxShares, "PM: slippage");
+
+        Position storage p = _positions[id][msg.sender];
+        if (outcome == YES) {
+            require(p.yesShares >= shares, "PM: shares");
+            p.yesShares -= shares;
+            m.poolYes = m.poolYes + shares - xpOut;
+            m.poolNo -= xpOut;
+        } else {
+            require(p.noShares >= shares, "PM: shares");
+            p.noShares -= shares;
+            m.poolNo = m.poolNo + shares - xpOut;
+            m.poolYes -= xpOut;
+        }
+        p.received += xpOut;
+        predictXP.credit(msg.sender, xpOut, bytes32(id));
+        emit Sold(id, msg.sender, outcome, xpOut, shares);
+    }
+
+    function resolve(uint256 id, uint8 outcome) external onlyOwner {
+        Market storage m = markets[id];
+        require(m.status == OPEN, "PM: not open");
+        require(block.timestamp >= m.closeTime, "PM: not closed");
+        require(outcome == YES || outcome == NO, "PM: outcome");
+        m.status = RESOLVED;
+        m.outcome = outcome;
+        emit MarketResolved(id, outcome);
+    }
+
+    /// @notice Voids a market; every share, Yes or No, then redeems for 0.5 XP.
+    /// @dev Not a refund of `spent - received`: that let a wallet keep profit
+    /// from selling into later buyers who were then refunded in full, so a
+    /// cancelled market could mint without bound. At 0.5 XP a share the market
+    /// pays out M - (poolYes + poolNo) / 2 on M = liquidity + net XP in sets,
+    /// and poolYes * poolNo >= liquidity^2 makes that at most net XP in.
+    function cancel(uint256 id) external onlyOwner {
+        Market storage m = markets[id];
+        require(m.status == OPEN, "PM: not open");
+        m.status = CANCELLED;
+        emit MarketCancelled(id);
+    }
+
+    function claim(uint256 id) external returns (uint256 xp) {
+        Market storage m = markets[id];
+        Position storage p = _positions[id][msg.sender];
+        if (m.status == RESOLVED) {
+            xp = m.outcome == YES ? p.yesShares : p.noShares;
+        } else {
+            require(m.status == CANCELLED, "PM: not settled");
+            xp = (p.yesShares + p.noShares) / 2;
+        }
+        require(xp != 0, "PM: nothing");
+        delete _positions[id][msg.sender];
+        predictXP.credit(msg.sender, xp, bytes32(id));
+        emit Claimed(id, msg.sender, xp);
+    }
+
+    function setOwner(address owner_) external onlyOwner {
+        require(owner_ != address(0), "PM: zero owner");
+        owner = owner_;
+        emit OwnerChanged(owner_);
+    }
+
+    function _tradable(uint256 id, uint8 outcome) private view returns (Market storage m) {
+        m = markets[id];
+        require(m.status == OPEN && block.timestamp < m.closeTime, "PM: closed");
+        require(outcome == YES || outcome == NO, "PM: outcome");
+    }
+
+    function _divUp(uint256 a, uint256 b) private pure returns (uint256) {
+        return (a + b - 1) / b;
+    }
+}

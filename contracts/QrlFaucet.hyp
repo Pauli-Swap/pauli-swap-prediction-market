@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: MIT
+pragma hyperion >=0.0.1;
+
+/**
+ * A QRL faucet for the private testnet, with sponsored claims.
+ *
+ * Copied from QuantumArk/infra/devnet/contracts/QrlFaucet.hyp for the
+ * PauliSwap devnet faucet; the only change is `lastClaimAt`, made private
+ * behind `lastClaimOf` (OC-V3-02).
+ *
+ * A tester arrives with an empty account, so the account cannot pay the gas a
+ * claim costs. The operator (the wallet that deploys and funds this contract)
+ * submits `claimFor(to)` on the tester's behalf and pays that gas; the tester
+ * signs nothing. An account that already holds QRL may call `claim()` itself.
+ *
+ * The limits live here rather than in the service that submits the claims, so
+ * a restarted or misconfigured service cannot drain the faucet: one drip per
+ * address per cooldown, never more than the balance. The service adds its own
+ * per-IP limit on top, which the chain cannot see.
+ */
+contract QrlFaucet {
+    error NotOperator();
+    error CoolingDown(uint256 nextAt);
+    error Empty(uint256 balance, uint256 drip);
+    error ZeroRecipient();
+    error TransferFailed();
+
+    event Funded(address indexed from, uint256 amount);
+    event Dripped(address indexed to, address indexed by, uint256 amount, uint256 nextAt);
+    event TermsSet(uint256 dripAmount, uint256 cooldown);
+    event Withdrawn(address indexed to, uint256 amount);
+
+    /// The sponsor: submits claims, pays their gas, sets the terms.
+    address public immutable operator;
+
+    uint256 public dripAmount;
+    uint256 public cooldown;
+    uint256 public totalDripped;
+    // QRVM: kept private behind lastClaimOf; hypc's generated getter for an
+    // address keyed mapping reads the wrong slot (OC-V3-02, docs/QRVM.md).
+    mapping(address => uint256) private lastClaimAt;
+
+    modifier onlyOperator() {
+        if (msg.sender != operator) revert NotOperator();
+        _;
+    }
+
+    constructor(uint256 dripAmount_, uint256 cooldown_) payable {
+        operator = msg.sender;
+        dripAmount = dripAmount_;
+        cooldown = cooldown_;
+        emit TermsSet(dripAmount_, cooldown_);
+        if (msg.value != 0) emit Funded(msg.sender, msg.value);
+    }
+
+    receive() external payable {
+        emit Funded(msg.sender, msg.value);
+    }
+
+    function lastClaimOf(address to) external view returns (uint256) {
+        return lastClaimAt[to];
+    }
+
+    /// When `to` may claim next; zero means now.
+    function nextClaimAt(address to) public view returns (uint256) {
+        uint256 last = lastClaimAt[to];
+        if (last == 0) return 0;
+        uint256 next = last + cooldown;
+        return next > block.timestamp ? next : 0;
+    }
+
+    /// A sponsored claim: the operator pays the gas, `to` receives the drip.
+    function claimFor(address to) external onlyOperator returns (uint256) {
+        return _drip(to);
+    }
+
+    /// A claim paid for by the claimant.
+    function claim() external returns (uint256) {
+        return _drip(msg.sender);
+    }
+
+    function setTerms(uint256 dripAmount_, uint256 cooldown_) external onlyOperator {
+        dripAmount = dripAmount_;
+        cooldown = cooldown_;
+        emit TermsSet(dripAmount_, cooldown_);
+    }
+
+    function withdraw(uint256 amount) external onlyOperator {
+        (bool ok,) = operator.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+        emit Withdrawn(operator, amount);
+    }
+
+    function _drip(address to) private returns (uint256) {
+        if (to == address(0)) revert ZeroRecipient();
+        uint256 next = nextClaimAt(to);
+        if (next != 0) revert CoolingDown(next);
+        uint256 amount = dripAmount;
+        if (address(this).balance < amount) revert Empty(address(this).balance, amount);
+
+        // Recorded before the transfer, so a recipient contract re-entering
+        // `claim` meets its own cooldown.
+        lastClaimAt[to] = block.timestamp;
+        totalDripped += amount;
+
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+        emit Dripped(to, msg.sender, amount, block.timestamp + cooldown);
+        return amount;
+    }
+}

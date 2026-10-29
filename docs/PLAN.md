@@ -4,7 +4,7 @@ Status: steps 1 to 3 of §5 are built (`contracts/`, `scripts/`) and pass the
 end to end run on a local `gqrl --dev` chain and on the private devnet (2026-10-28,
 chain 3151908, 39/39 checks, throwaway contracts). After the cancel fix the
 local run is 41/41. Standing devnet deployment: `deployments/devnet.json`
-(block 4440).
+(block 41, after the devnet was regenerated on 2026-10-28 17:17 UTC).
 Decisions it rests on are in `docs/PRODUCT.md` §3 ("Decided 2026-10-28"). The
 product owner accepted the proposed defaults on 2026-10-28 and expects 3 to 20
 players (§3.1).

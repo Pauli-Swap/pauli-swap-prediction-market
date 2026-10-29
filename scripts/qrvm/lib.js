@@ -144,7 +144,12 @@ class Chain {
       method: 'qrl_getLogs',
       params: [{ address: contract.options.address, fromBlock: '0x' + fromBlock.toString(16), toBlock: 'latest', topics: [topic0] }],
     });
-    return logs.map((l) => this.web3.qrl.abi.decodeLog(abi.inputs, l.data, l.topics.slice(1)));
+    return logs.map((l) =>
+      Object.assign(this.web3.qrl.abi.decodeLog(abi.inputs, l.data, l.topics.slice(1)), {
+        blockNumber: Number(l.blockNumber),
+        transactionHash: l.transactionHash,
+      })
+    );
   }
 }
 

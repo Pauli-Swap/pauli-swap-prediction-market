@@ -31,7 +31,7 @@ const ADDRESS = /^[Qq][0-9a-fA-F]{128}$/;
 const deployment = JSON.parse(fs.readFileSync(path.join(ROOT, 'deployments', `faucet-${network}.json`), 'utf8'));
 const faucetAddress = deployment.contracts.QrlFaucet;
 const DENYLIST = path.join(ROOT, 'quests', 'denylist.json');
-const CLAIM_LOG = path.join(ROOT, 'data', 'faucet-claims.jsonl');
+const CLAIM_LOG = env.FAUCET_CLAIM_LOG ? path.resolve(ROOT, env.FAUCET_CLAIM_LOG) : path.join(ROOT, 'data', 'faucet-claims.jsonl');
 const SALT = env.FAUCET_IP_SALT || faucetAddress;
 
 const words = (env.FAUCET_MNEMONIC || '').trim().split(/\s+/);

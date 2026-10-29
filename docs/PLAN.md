@@ -1,10 +1,11 @@
 # PauliSwap Predict — build plan
 
-Status: steps 1 to 3 of §5 are built (`contracts/`, `scripts/`) and pass the
-end to end run on a local `gqrl --dev` chain and on the private devnet (2026-10-28,
-chain 3151908, 39/39 checks, throwaway contracts). After the cancel fix the
-local run is 41/41. Standing devnet deployment: `deployments/devnet.json`
-(block 41, after the devnet was regenerated on 2026-10-28 17:17 UTC).
+Status: every step of §5 is done. The contracts pass the end to end run on a
+local `gqrl --dev` chain and on the private devnet (41/41 on 2026-10-29,
+chain 3151908, throwaway contracts). Standing devnet deployment:
+`deployments/devnet.json` (block 41, after the devnet was regenerated on
+2026-10-28 17:17 UTC); season 1 runs until 2026-11-25 17:27 UTC. What season 1
+still needs is in `docs/PROPOSAL-SEASON-1-OPS.md`.
 Decisions it rests on are in `docs/PRODUCT.md` §3 ("Decided 2026-10-28"). The
 product owner accepted the proposed defaults on 2026-10-28 and expects 3 to 20
 players (§3.1).
@@ -130,6 +131,9 @@ as `PauliV3PoolLens` does in `pauli-swap`.
 - `scripts/qrvm/deploy.js` writes `deployments/<network>.json` (`network`,
   `chainId`, `startBlock`, `deployedAt`, `contracts`), then calls
   `PauliPredictXP.setMarket`, `setAttester` and `startSeason`.
+- `scripts/qrvm/market.js`: owner commands `list`, `create`, `resolve`,
+  `cancel`, `season:close`, `season:start`, dry run unless `--send`
+  (`docs/SEASON-END.md`).
 
 ---
 
@@ -215,9 +219,10 @@ wallets are **not** solved at the contract level and stay an open risk.
 2. `PauliPredictXP` and tests. **Done.**
 3. `PredictMarket` and tests; measure code size. **Done**: runtime 7,042
    bytes, `PauliPredictXP` 4,793, so no lens is needed.
-4. Deploy on `gqrl --dev` (**done**), then the devnet.
-5. Indexer module and attester bot.
-6. Interface pages.
+4. Deploy on `gqrl --dev`, then the devnet. **Done** (`deployments/devnet.json`).
+5. Indexer module and attester bot. **Done**: pauli-swap-indexer's Predict
+   module and `scripts/qrvm/attester.js`.
+6. Interface pages. **Done** in pauli-swap-interface, with owner tools.
 
 Commands:
 
@@ -255,9 +260,15 @@ through a hand-written view, never a generated getter, and the only generated
 getters are `markets` (uint-indexed array) and `seasonClosed` (uint key), both
 safe per `docs/QRVM.md` Q2.
 
-Devnet run: `QRVM_ENV=.env.devnet npm run test:qrvm`, 39/39 on 2026-10-28. The
+Devnet run: `QRVM_ENV=.env.devnet npm run test:qrvm`, 41/41 on 2026-10-29. The
 devnet misses slots (12 s slots, gaps up to 120 s measured), so the test sizes
 market 0's close window from recent block gaps; the run takes ~15 min.
 
-Not covered yet: `closeSeason` and the `startSeason` close guard (both need a
-season that has ended); checked by hand on a local chain on 2026-10-28.
+Not covered by `test:qrvm`: `closeSeason` and the `startSeason` close guard
+(both need a season that has ended). Checked on a local chain on 2026-10-29
+with `market.js season:close` / `season:start` on a 40 second season.
+
+Also on the local chain: `npm run test:attester` (daily cap, a season quest
+that waits, denylist, no double credit, failed credits counted) and
+`npm run test:faucet` (parallel claims from one IP stay within
+`FAUCET_IP_LIMIT`; the pre-75aec24 server fails it with 8 drips for 2 slots).

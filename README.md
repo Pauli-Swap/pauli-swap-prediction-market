@@ -35,6 +35,7 @@ All of these read `QRVM_ENV=.env.devnet`; see `.env.devnet.example`.
 | --- | --- |
 | [docs/PRODUCT.md](docs/PRODUCT.md) | Product rules: what is decided, what the design assumed, open questions for the contract design |
 | [docs/PROPOSAL.md](docs/PROPOSAL.md) | Proposal for the product owner: XP is PauliSwap Predict event points, naming that follows |
+| [docs/PROPOSAL-SEASON-1-OPS.md](docs/PROPOSAL-SEASON-1-OPS.md) | What this repo still owes season 1: market CLI, market schedule, attester health, season-end runbook, rules to decide |
 | [docs/PLAN.md](docs/PLAN.md) | Build plan: on-chain / off-chain split, `PauliPredictXP` and `PredictMarket`, proposed quests, order of work |
 | [docs/DESIGN.md](docs/DESIGN.md) | Figma file and node map of the Predict screens, the minimal-design contract, theme |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | What the contracts must look like for the QIP-55 toolchain, the interface and the indexer |

@@ -139,9 +139,25 @@ const server = http.createServer(async (req, res) => {
       address = `Q${address.slice(1)}`;
       if (denied(address)) return send(res, 403, { error: 'denied' });
       const ip = clientIp(req);
-      if (recentDrips(ip).length >= IP_LIMIT) return send(res, 429, { error: 'ip-limit' });
-      const result = await claim(address);
-      if (result.status === 200) recentDrips(ip).push(Date.now());
+      const slots = recentDrips(ip);
+      if (slots.length >= IP_LIMIT) return send(res, 429, { error: 'ip-limit' });
+      // The slot is taken before the await: checking now and pushing after the
+      // claim let N parallel requests from one IP all pass the limit.
+      const slot = Date.now();
+      slots.push(slot);
+      const release = () => {
+        const recent = recentDrips(ip);
+        const i = recent.indexOf(slot);
+        if (i !== -1) recent.splice(i, 1);
+      };
+      let result;
+      try {
+        result = await claim(address);
+      } catch (error) {
+        release();
+        throw error;
+      }
+      if (result.status !== 200) release();
       const ipHash = crypto.createHash('sha256').update(`${SALT}:${ip}`).digest('hex').slice(0, 16);
       record({ at: new Date().toISOString(), address, ipHash, status: result.status, hash: result.body.hash ?? null });
       console.log(`${new Date().toISOString()} claim ${address.slice(0, 12)}… -> ${result.status}${result.body.hash ? ` ${result.body.hash}` : ''}`);

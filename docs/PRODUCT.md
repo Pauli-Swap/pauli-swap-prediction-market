@@ -59,7 +59,7 @@ a yes from the product owner before contract work depends on it.
 | --- | --- |
 | Quests reset at **00:00 UTC** | Quests screen countdown; quest contract or indexer day boundary |
 | A winning share pays **100 XP** | Market screen explanation line; payout math |
-| Winnings are taken with an explicit **Claim** step | Rewards / Market screens; a `claim` write instead of an automatic payout |
+| ~~Winnings are taken with an explicit **Claim** step~~ Decided 2026-10-30: paid automatically by the attester (`settle`); `claim` stays as a fallback | Rewards / Market screens; no claim banner |
 | #2 and #3 get **one whitelist spot each** | Rewards screen. The owner's wording was "2 whitelist cho top 2 và 3" ("2 whitelist for top 2 and 3"), which reads as one each but was not stated per rank |
 
 ---

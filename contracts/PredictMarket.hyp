@@ -181,23 +181,39 @@ contract PredictMarket {
 
     function claim(uint256 id) external returns (uint256 xp) {
         Market storage m = markets[id];
-        Position storage p = _positions[id][msg.sender];
-        if (m.status == RESOLVED) {
-            xp = m.outcome == YES ? p.yesShares : p.noShares;
-        } else {
-            require(m.status == CANCELLED, "PM: not settled");
-            xp = (p.yesShares + p.noShares) / 2;
-        }
+        require(m.status != OPEN, "PM: not settled");
+        xp = _pay(m, id, msg.sender);
         require(xp != 0, "PM: nothing");
-        delete _positions[id][msg.sender];
-        predictXP.credit(msg.sender, xp, bytes32(id));
-        emit Claimed(id, msg.sender, xp);
+    }
+
+    /// @notice Pays each of `users` what `claim` would pay them on a resolved
+    /// or cancelled market. Anyone may call it; users with nothing to collect
+    /// are skipped, so a repeated or overlapping batch pays nothing twice.
+    /// @dev The holder list comes from off chain: looping over holders inside
+    /// `resolve` / `cancel` would make their gas unbounded.
+    function settle(uint256 id, address[] calldata users) external {
+        Market storage m = markets[id];
+        require(m.status != OPEN, "PM: not settled");
+        for (uint256 i = 0; i < users.length; i++) _pay(m, id, users[i]);
     }
 
     function setOwner(address owner_) external onlyOwner {
         require(owner_ != address(0), "PM: zero owner");
         owner = owner_;
         emit OwnerChanged(owner_);
+    }
+
+    function _pay(Market storage m, uint256 id, address user) private returns (uint256 xp) {
+        Position storage p = _positions[id][user];
+        if (m.status == RESOLVED) {
+            xp = m.outcome == YES ? p.yesShares : p.noShares;
+        } else {
+            xp = (p.yesShares + p.noShares) / 2;
+        }
+        if (xp == 0) return 0;
+        delete _positions[id][user];
+        predictXP.credit(user, xp, bytes32(id));
+        emit Claimed(id, user, xp);
     }
 
     function _tradable(uint256 id, uint8 outcome) private view returns (Market storage m) {

@@ -11,7 +11,6 @@ import "./interfaces/IPauliPredictXP.hyp";
 contract PauliPredictXP is IPauliPredictXP {
     address public owner;
     address public attester;
-    address public market;
 
     uint256 public currentSeason;
     uint256 public override seasonEndsAt;
@@ -28,7 +27,7 @@ contract PauliPredictXP is IPauliPredictXP {
 
     event OwnerChanged(address indexed owner);
     event AttesterChanged(address indexed attester);
-    event MarketChanged(address indexed market);
+    event MarketChanged(address indexed market, bool allowed);
     event ParamsChanged(uint256 dailyQuestCap, uint256 checkInXp);
     event SeasonStarted(uint256 indexed season, uint256 endsAt);
     event SeasonClosed(uint256 indexed season, uint256 snapshotBlock, address[3] winners);
@@ -41,9 +40,15 @@ contract PauliPredictXP is IPauliPredictXP {
     mapping(uint256 => mapping(address => uint256)) private _balance;
     mapping(bytes32 => bool) private _questDone;
     mapping(bytes32 => uint256) private _questXpOnDay;
+    mapping(address => bool) private _isMarket;
 
     modifier onlyOwner() {
         require(msg.sender == owner, "XP: owner");
+        _;
+    }
+
+    modifier onlyMarket() {
+        require(_isMarket[msg.sender], "XP: market");
         _;
     }
 
@@ -61,6 +66,10 @@ contract PauliPredictXP is IPauliPredictXP {
 
     function xpOfSeason(uint256 season, address user) external view returns (uint256) {
         return _balance[season][user];
+    }
+
+    function isMarket(address market) external view returns (bool) {
+        return _isMarket[market];
     }
 
     function questDone(address user, uint256 questId, uint256 day) external view returns (bool) {
@@ -99,8 +108,7 @@ contract PauliPredictXP is IPauliPredictXP {
         _completeQuest(msg.sender, CHECK_IN_QUEST, today(), checkInXp);
     }
 
-    function debit(address user, uint256 amount, bytes32 reason) external override {
-        require(msg.sender == market, "XP: market");
+    function debit(address user, uint256 amount, bytes32 reason) external override onlyMarket {
         uint256 season = currentSeason;
         uint256 balance = _balance[season][user];
         require(balance >= amount, "XP: balance");
@@ -110,8 +118,7 @@ contract PauliPredictXP is IPauliPredictXP {
 
     /// @dev Not gated on `seasonActive`: winnings claimed after a season ends
     /// but before the next starts still belong to that season.
-    function credit(address user, uint256 amount, bytes32 reason) external override {
-        require(msg.sender == market, "XP: market");
+    function credit(address user, uint256 amount, bytes32 reason) external override onlyMarket {
         _credit(user, amount, reason);
     }
 
@@ -129,7 +136,7 @@ contract PauliPredictXP is IPauliPredictXP {
 
     /// @notice Records the top 3 that the indexer ranked at `snapshotBlock`.
     /// Prizes are delivered by hand; this is the public record of who won.
-    /// @dev Call after every market of the season is resolved and claimed;
+    /// @dev Call after every market of the season is resolved and paid;
     /// `startSeason` refuses to open the next season until this has run.
     function closeSeason(uint256 snapshotBlock, address[3] calldata winners) external onlyOwner {
         uint256 season = currentSeason;
@@ -151,9 +158,11 @@ contract PauliPredictXP is IPauliPredictXP {
         emit AttesterChanged(attester_);
     }
 
-    function setMarket(address market_) external onlyOwner {
-        market = market_;
-        emit MarketChanged(market_);
+    /// @notice Allows or revokes a PredictMarket. Several may be allowed at
+    /// once, so a replaced market can stay allowed until its claims are paid.
+    function setMarket(address market, bool allowed) external onlyOwner {
+        _isMarket[market] = allowed;
+        emit MarketChanged(market, allowed);
     }
 
     function setParams(uint256 dailyQuestCap_, uint256 checkInXp_) external onlyOwner {

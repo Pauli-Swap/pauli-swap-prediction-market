@@ -14,9 +14,9 @@ Season 1 ends **2026-11-25 17:27:48 UTC** (`seasonEndsAt` 1795627668).
 
 ## Why the order matters
 
-- `PauliPredictXP.credit` is not gated on the season, so a claim made late
+- `PauliPredictXP.credit` is not gated on the season, so a payout made late
   still lands in whatever season is current. Markets must be settled and
-  claimed while season 1 is still current.
+  paid while season 1 is still current.
 - `closeSeason` reverts until `block.timestamp >= seasonEndsAt`, and only
   once per season.
 - `startSeason` reverts until the current season is closed, so season 2
@@ -41,11 +41,26 @@ Cancel only when the question has no fair answer: a cancelled market pays
 0.5 XP for every Yes and No share, so a wallet that bought below 50% gains and
 one that bought above it loses.
 
-## 2. Claim window: 48 hours
+## 2. Check that every holder is paid
 
-Announce that winnings must be claimed (Claim on the market page) within
-48 hours. Unclaimed winnings still count in the ranking as `claimable` (step
-4), but they are XP only once claimed.
+Nobody has to claim: on its next tick after a market is resolved or
+cancelled, the attester pays every holder through `PredictMarket.settle`.
+Check that it did:
+
+```
+npm run market:list                              # no market is open
+curl -s http://127.0.0.1:8549/health             # on the chain host: "unpaidMarkets": []
+```
+
+If the attester is down or `unpaidMarkets` stays non-empty, pay by hand. It
+reads the holders from the chain, needs no indexer, and anyone may send it:
+
+```
+npm run market:settle -- <id>
+npm run market:settle -- <id> --send
+```
+
+A second run prints "nobody left to pay".
 
 ## 3. Sybil review
 
@@ -62,10 +77,10 @@ effect only after the ops repo pushes it (`scripts/push_chain_host.sh`).
 
 ## 4. Snapshot
 
-Pick `snapshotBlock`: a block after the claim window closes. The ranking is
-`xp_balance + claimable` at that block, where claimable is the winning shares
-of resolved markets and half of all shares of cancelled markets not yet
-claimed. Eligibility and the tie break are the rules of PRODUCT.md §3 and
+Pick `snapshotBlock`: a block after the last `settle` of step 2. The ranking
+is `xp_balance + claimable` at that block, where claimable is the winning
+shares of resolved markets and half of all shares of cancelled markets not
+yet paid; after step 2 it is 0 for everyone. Eligibility and the tie break are the rules of PRODUCT.md §3 and
 docs/PROPOSAL-SEASON-1-OPS.md §6, which the product owner has to settle
 first.
 

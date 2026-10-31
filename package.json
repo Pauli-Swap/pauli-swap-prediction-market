@@ -17,6 +17,7 @@
     "market:create": "node scripts/qrvm/market.js create",
     "market:resolve": "node scripts/qrvm/market.js resolve",
     "market:cancel": "node scripts/qrvm/market.js cancel",
+    "market:settle": "node scripts/qrvm/market.js settle",
     "season:close": "node scripts/qrvm/market.js season:close",
     "season:start": "node scripts/qrvm/market.js season:start",
     "test:attester": "node scripts/qrvm/attester-test.js",

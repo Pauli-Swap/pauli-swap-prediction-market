@@ -3,6 +3,8 @@ const { loadEnv, Chain, writeDeployment } = require('./lib');
 /// Deploys PauliPredictXP and PredictMarket, wires them, and opens season 1.
 ///   QRVM_ENV=.env.devnet node scripts/qrvm/deploy.js
 /// Defaults are sized for 3 to 20 players; docs/PLAN.md §3.1 explains them.
+/// SEASON_ENDS_AT (unix seconds) fixes the season end, so a redeploy keeps the
+/// date already announced; otherwise it is SEASON_DAYS from now.
 
 const XP = 10n ** 18n;
 
@@ -19,9 +21,9 @@ async function main() {
 
   const predictXP = await chain.deploy('PauliPredictXP', [dailyCap, checkIn]);
   const market = await chain.deploy('PredictMarket', [predictXP.options.address]);
-  await chain.tx(predictXP, 'setMarket', [market.options.address]);
+  await chain.tx(predictXP, 'setMarket', [market.options.address, true]);
   await chain.tx(predictXP, 'setAttester', [env.ATTESTER_ADDRESS || chain.address]);
-  const endsAt = Math.floor(Date.now() / 1000) + seasonDays * 86400;
+  const endsAt = env.SEASON_ENDS_AT ? Number(env.SEASON_ENDS_AT) : Math.floor(Date.now() / 1000) + seasonDays * 86400;
   await chain.tx(predictXP, 'startSeason', [endsAt]);
 
   const out = {

@@ -1,8 +1,8 @@
 const { loadEnv, Chain } = require('./lib');
 
 /// End to end run on a QIP-55 node with fresh contracts and three throwaway
-/// traders: quests, check-in, buy / sell, cancel + refund, resolve + claim, and
-/// a rebuild of every balance from logs, as the indexer will do it.
+/// traders: quests, check-in, buy / sell, cancel + settle, resolve + claim +
+/// settle, and a rebuild of every balance from logs, as the indexer will do it.
 ///   QRVM_ENV=.env.local-qrvm node scripts/qrvm/e2e.js
 
 const XP = 10n ** 18n;
@@ -48,7 +48,7 @@ async function main() {
   const startBlock = Number(await admin.web3.qrl.getBlockNumber());
   const predictXP = await admin.deploy('PauliPredictXP', [500n * XP, 10n * XP]);
   const market = await admin.deploy('PredictMarket', [predictXP.options.address]);
-  await admin.tx(predictXP, 'setMarket', [market.options.address]);
+  await admin.tx(predictXP, 'setMarket', [market.options.address, true]);
   await admin.tx(predictXP, 'setAttester', [admin.address]);
   const now = () => Math.floor(Date.now() / 1000);
   const seasonEnd = now() + 86400;
@@ -63,6 +63,7 @@ async function main() {
     traders.push(s);
   }
   const [a, b, c] = traders;
+  const nobody = (await admin.newSigner()).address;
   const xpOf = async (s) => big(await admin.call(predictXP, 'xpOf', s.address));
 
   console.log('quests');
@@ -82,6 +83,7 @@ async function main() {
   check('check-in pays 10 XP', (await xpOf(a)) === 130n * XP);
   await expectRevert(a, a.predictXP, 'checkIn', [], 'XP: done');
   await expectRevert(a, a.predictXP, 'debit', [a.address, 1n, '0x' + '00'.repeat(32)], 'XP: market');
+  check('isMarket view', (await admin.call(predictXP, 'isMarket', market.options.address)) === true && (await admin.call(predictXP, 'isMarket', a.address)) === false);
 
   console.log('market 0: trade, resolve, claim');
   const liquidity = 200n * XP;
@@ -117,6 +119,7 @@ async function main() {
   await expectRevert(c, c.market, 'sell', [0, YES, 100n * XP, 10n ** 30n], 'PM: shares');
   await expectRevert(c, c.market, 'buy', [0, YES, 1000n * XP, 0], 'XP: balance');
   await expectRevert(admin, market, 'resolve', [0, YES], 'PM: not closed');
+  await expectRevert(b, b.market, 'settle', [0, [a.address]], 'PM: not settled');
   await expectRevert(admin, market, 'quoteSell', [0, YES, 10000n * XP], 'PM: too much');
   await expectRevert(a, a.market, 'createMarket', ['x', now() + 60, liquidity], 'PM: owner');
   await expectRevert(admin, predictXP, 'startSeason', [seasonEnd + 86400], 'XP: season live');
@@ -144,11 +147,10 @@ async function main() {
   await expectRevert(b, b.market, 'buy', [1, YES, 1n * XP, 0], 'PM: closed');
   const bNo = big((await admin.call(market, 'positionOf', 1, b.address)).noShares);
   const bBefore = await xpOf(b);
-  for (const s of traders) {
-    const p = await admin.call(market, 'positionOf', 1, s.address);
-    if ((big(p.yesShares) + big(p.noShares)) / 2n !== 0n) await s.tx(s.market, 'claim', [1]);
-  }
-  check('cancel pays 0.5 XP a share', (await xpOf(b)) - bBefore === bNo / 2n);
+  await admin.tx(market, 'settle', [1, [a.address, b.address, c.address, nobody]]);
+  check('settle after cancel pays 0.5 XP a share', (await xpOf(b)) - bBefore === bNo / 2n);
+  // A's sell can leave a few wei of shares that redeem for 0 and stay put.
+  check('settle after cancel leaves nothing to pay', (await Promise.all(traders.map((s) => admin.call(market, 'positionOf', 1, s.address)))).every((p) => (big(p.yesShares) + big(p.noShares)) / 2n === 0n));
   const minted = (await totalXp()) - before;
   check('cancelled market mints nothing', minted <= 0n, `net ${minted / XP} XP`);
   await expectRevert(b, b.market, 'claim', [1], 'PM: nothing');
@@ -167,8 +169,23 @@ async function main() {
   await admin.tx(market, 'resolve', [0, YES]);
   const aBefore = await xpOf(a);
   await a.tx(a.market, 'claim', [0]);
-  await c.tx(c.market, 'claim', [0]);
   check('winner A paid 1 XP per share', (await xpOf(a)) - aBefore === aShares - sold);
+
+  // B, not the owner, settles a batch of a claimed winner, an unclaimed
+  // winner, a loser and an empty wallet: only C is paid.
+  const cBefore = await xpOf(c);
+  const bStake = await xpOf(b);
+  const bPos = await admin.call(market, 'positionOf', 0, b.address);
+  const settleBlock = Number(await admin.web3.qrl.getBlockNumber()) + 1;
+  await b.tx(b.market, 'settle', [0, [a.address, b.address, c.address, nobody]]);
+  check('settle pays the unclaimed winner', (await xpOf(c)) - cBefore === cShares);
+  check('settle skips the loser and leaves its position', (await xpOf(b)) === bStake && big((await admin.call(market, 'positionOf', 0, b.address)).noShares) === big(bPos.noShares));
+  const claimedIn = async (from) => (await admin.events(market, 'Claimed', from)).filter((e) => Number(e.id) === 0);
+  check('settle emits one Claimed, for C', (await claimedIn(settleBlock)).map((e) => e.user.toLowerCase()).join() === c.address.toLowerCase());
+  const again = Number(await admin.web3.qrl.getBlockNumber()) + 1;
+  await admin.tx(market, 'settle', [0, [a.address, b.address, c.address]]);
+  check('a second settle pays nothing', (await xpOf(c)) - cBefore === cShares && (await claimedIn(again)).length === 0);
+  await expectRevert(c, c.market, 'claim', [0], 'PM: nothing');
   await expectRevert(b, b.market, 'claim', [0], 'PM: nothing');
   await expectRevert(a, a.market, 'claim', [0], 'PM: nothing');
 

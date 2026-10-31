@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ROOT, loadEnv, Chain } = require('./lib');
+const { settleMarket } = require('./attester');
 
 /// Owner tooling for PredictMarket and the season of PauliPredictXP. Signs with
 /// DEPLOYER_MNEMONIC, which must be the owner. Every command that writes is a
@@ -12,9 +13,14 @@ const { ROOT, loadEnv, Chain } = require('./lib');
 ///   create "<question>" <closeTime> [seedXP]   seedXP defaults to 100
 ///   resolve <id> yes|no
 ///   cancel <id>
+///   settle <id>                                pays every holder of a settled market
 ///   season:close --snapshot <file>                 refuses while a market is open,
 ///   season:close --block <n> --winners <q1,q2,q3>  unless --allow-open
 ///   season:start <endsAt>
+///
+/// `settle` is what the attester does on its own each tick, for when it is
+/// down. It needs no indexer: holders come from the market's Bought logs, and
+/// anyone may send it, so it does not check the owner.
 ///
 /// Times are unix seconds or ISO 8601 with an explicit zone ("2026-11-12T00:00Z").
 ///
@@ -167,6 +173,19 @@ async function cancel(ctx, idText) {
   await execute(ctx.chain, ctx.pm, 'cancel', [id]);
 }
 
+async function settle(ctx, idText) {
+  const { chain, pm, deployment } = ctx;
+  const id = Number(idText);
+  const m = await market(ctx, id);
+  if (m.status === 0) fail(`market ${id} is still open; resolve or cancel it first`);
+  const holders = (await chain.events(pm, 'Bought', deployment.startBlock || 0)).filter((e) => Number(e.id) === id).map((e) => e.user);
+  const rows = await settleMarket(chain, pm, id, holders, { send });
+  if (!rows.length) return console.log(`market    #${id}: nobody left to pay`);
+  for (const r of rows) console.log(`settle    #${id}  ${r.users} users  ${Number(r.xp / 10n ** 15n) / 1000} XP  ${r.status}${r.gasUsed ? `  gas ${r.gasUsed}` : ''}`);
+  if (rows.some((r) => !r.status.startsWith('sent') && r.status !== 'settle')) process.exitCode = 1;
+  else if (!send) console.log('simulation passes; nothing sent. Re-run with --send to execute.');
+}
+
 function readSnapshot() {
   const file = flag('--snapshot');
   if (file) {
@@ -226,7 +245,7 @@ async function seasonStart(ctx, endsText) {
   await execute(chain, xp, 'startSeason', [endsAt]);
 }
 
-const COMMANDS = { list, create, resolve, cancel, 'season:close': seasonClose, 'season:start': seasonStart };
+const COMMANDS = { list, create, resolve, cancel, settle, 'season:close': seasonClose, 'season:start': seasonStart };
 
 async function main() {
   const run = COMMANDS[command];

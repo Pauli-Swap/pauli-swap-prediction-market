@@ -2,7 +2,10 @@
 
 Status: proposed 2026-10-29; §1, §2, §4, §5, §7 and the attester half of §3
 done the same day (see each box). Open: the faucet alert in §3 (ops repo),
-§6 (product owner) and §8. From the cross-repo TODO in
+§6 (product owner), §8, and of §9 (added 2026-10-30: automatic payout and a
+Predict redeploy) the server side of the sync, the gas figure, the rules
+and CI; its contract, attester, CLI and runbook work was done 2026-10-30 and
+the redeploy 2026-10-31. From the cross-repo TODO in
 `pauli-swap-interface/TODO.md`. Season 1 ends 2026-11-25 17:27 UTC
 (`endsAt` 1795627668, after the devnet was regenerated on 2026-10-28).
 
@@ -104,3 +107,94 @@ The snapshot cannot be final until these are settled. Proposed defaults:
       wallet used day to day.
 - [ ] Faucet funding on the testnet, and a review of 50 QRL per claim, 24 h
       cooldown, 5 claims per IP.
+
+## 9. Pay winnings automatically, redeploy Predict (from `pauli-swap-interface/docs/PROPOSAL-SEASON-1.md`)
+
+Decided 2026-10-30: a settled market pays every holder without the holder
+calling `claim`. `claim(id)` only pays `msg.sender`, so this needs a contract
+change, and the whole Predict pair is redeployed while season 1 has about 3
+test wallets (snapshot 2026-10-29). The 48 h claim window and the interface's
+claim banner are dropped.
+
+### 9.1 Contracts
+
+- [x] `PredictMarket.settle(uint256 id, address[] calldata users)`:
+      permissionless, pays each user exactly what `claim` would (winning
+      side, or `(yes + no) / 2` when cancelled) to that user, skips users
+      with nothing, deletes the position and emits the same
+      `Claimed(id, user, xp)`, so the indexer and the interface read it
+      unchanged. Reverts `PM: not settled` on an open market. `claim(id)`
+      stays as the fallback.
+- [x] No loop over holders inside `resolve` / `cancel`: the holder count has
+      no bound, so neither would the gas, and a market could become
+      unresolvable. The holder list comes from off chain (§9.3).
+- [x] `PauliPredictXP`: `setMarket(address)` becomes
+      `setMarket(address market, bool allowed)` with a private
+      `mapping(address => bool)` and an explicit `isMarket(address)` view
+      (OC-V3-02: no generated getter on an address-keyed mapping). Next
+      time only the market is replaced; a retired market can still pay its
+      claims. `reason` stays `bytes32(id)`; with two live markets the
+      indexer tells them apart by the emitting market, not by `reason`.
+- [x] e2e (`npm run test:qrvm`): `settle` after resolve and after cancel,
+      a batch mixing winners, losers and empty wallets, a second `settle` on
+      the same users paying nothing, `claim` after `settle` reverting
+      `PM: nothing`, `settle` on an open market reverting. Local chain
+      2026-10-30, devnet 2026-10-31: 49/49.
+
+### 9.2 Redeploy
+
+- [x] `deploy:qrvm` both contracts; `setMarket(market, true)`,
+      `setAttester`, `setParams` as today. `deploy.js` now sends
+      `setMarket(market, true)` and takes `SEASON_ENDS_AT`. Deployed
+      2026-10-31 from block 15247 (`deployments/devnet.json`); same attester,
+      500 XP cap, 10 XP check-in.
+- [x] `startSeason(1795627668)` (`SEASON_ENDS_AT=1795627668` in
+      `.env.devnet`): the same `endsAt`, so the season-end date
+      on the site and in every doc stays 2026-11-25 17:27 UTC.
+- [x] Recreate the test markets with the README questions and the same close
+      times (the one closing 2026-10-30 12:00 UTC gets a new near close, it
+      doubles as the resolve test). Update the README market table. Blocks
+      15255 to 15258; market 0 now closes 2026-10-31 12:00 UTC, its
+      question dated to match.
+- [ ] Sync: `sync:predict` in the interface and the indexer (the indexer
+      rebuilds only its `predict_*` tables, TODO 2.3), then the ops repo
+      pushes the attester with the new addresses and the interface reruns
+      `push_web.sh`.
+- [x] Note the old addresses and the reset in the README, so nobody reads the
+      old contract's events as season 1.
+
+### 9.3 Attester pays settled markets
+
+- [x] A second pass in `tick`: for each market with `MarketResolved` or
+      `MarketCancelled` that still has holders, read them with
+      `predictPositions(market: id)` (empty positions are left out by
+      default) and call `settle(id, users)` in batches (start at 20; measure
+      the gas). Denylisted wallets are paid too: the denylist blocks quest
+      XP, not market winnings, and the snapshot drops denied wallets anyway.
+- [x] Idempotent across restarts and indexer lag: a user the indexer still
+      lists but the chain already paid costs gas and pays nothing, so check
+      `positionOf` before adding a user to the batch.
+- [x] `/health`: settled markets with holders left, last `settle` tx.
+- [x] `market:settle <id>` in `scripts/qrvm/market.js` (dry run unless
+      `--send`), the same batch, for when the attester is down. It reads the
+      holders from the market's `Bought` logs, so it needs no indexer.
+- [x] `test:attester`: a resolved market is paid on the next tick, a second
+      tick sends nothing.
+- [ ] Attester gas: the 50 QRL alert in the ops repo §3 was sized for
+      `creditQuest` only; measure again once `settle` runs. Local chain,
+      2026-10-30: 402,516 gas for a batch of 20 winners (about 20,000 a
+      user), 47,244 for one, so 20 stays the batch size. Confirm on the
+      devnet and hand the figure to the ops repo.
+
+### 9.4 Runbook and rules
+
+- [x] `SEASON-END.md` step 2: replace the 48 h claim window with a check
+      that every market is settled and paid: `market:list` shows no open
+      market and the attester's `/health` reports no holders left (or run
+      `market:settle`). Step 4's `claimable` is then 0 for everyone.
+- [ ] Once §6 is decided, write the rules here and point `SEASON-END.md` at
+      this section. It points at PRODUCT.md §3, which has no eligibility
+      rule (the 7 days / 3 markets threshold is only in PLAN.md).
+- [ ] CI (`.github/workflows/ci.yml`): `compile:qrvm`, `test:attester`,
+      `test:faucet` on a local chain (TODO 4.1). Only the indexer has CI
+      today.

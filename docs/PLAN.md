@@ -97,6 +97,12 @@ ERC-1155, to save code size.
 - Optional trade fee kept in the pool; 0 in v1.
 - `resolve(id, outcome)` after `closeTime`, `cancel(id)` before resolution,
   both owner only.
+- `settle(id, users)`, permissionless: pays each listed user what `claim`
+  would and skips the rest. The attester sends it for every holder once a
+  market is resolved or cancelled (decided 2026-10-30,
+  PROPOSAL-SEASON-1-OPS.md §9), so nobody has to claim; `claim(id)` stays
+  as the fallback. Holders come from off chain, since a loop over them in
+  `resolve` / `cancel` would have no gas bound.
 - `claim(id)`: resolved, each winning share pays 1 XP; cancelled, every share,
   Yes or No, pays 0.5 XP. A `netSpent` refund (XP paid in minus XP received
   from sells) was dropped: a wallet that sold for a profit kept it while the
@@ -130,9 +136,12 @@ as `PauliV3PoolLens` does in `pauli-swap`.
   like `check:qrvm`, and `scripts/qrvm/lib.js` with its private-RPC guard.
 - `scripts/qrvm/deploy.js` writes `deployments/<network>.json` (`network`,
   `chainId`, `startBlock`, `deployedAt`, `contracts`), then calls
-  `PauliPredictXP.setMarket`, `setAttester` and `startSeason`.
+  `PauliPredictXP.setMarket(market, true)`, `setAttester` and `startSeason`
+  (`SEASON_ENDS_AT` pins the end on a redeploy). `setMarket` keeps a set,
+  so a replaced market can stay allowed until its holders are paid.
 - `scripts/qrvm/market.js`: owner commands `list`, `create`, `resolve`,
-  `cancel`, `season:close`, `season:start`, dry run unless `--send`
+  `cancel`, `season:close`, `season:start`, plus `settle` (anyone), dry run
+  unless `--send`
   (`docs/SEASON-END.md`).
 
 ---
@@ -199,16 +208,17 @@ wallets are **not** solved at the contract level and stay an open risk.
    `qrl_getLogs` (`src/lib/logs.ts`), quests and leaderboard from the indexer.
 4. **Season end**, in this order:
    1. Resolve or cancel every market of the season.
-   2. Leave a claim window (e.g. 48 h). The ranking is `xp_balance +
-      claimable`, where claimable is the winning shares and, on cancelled
-      markets, half of all shares not yet claimed (from `Bought` / `Sold` / `Claimed` on settled markets),
-      so a wallet that won but has not claimed is not ranked at 0.
+   2. Check that the attester has paid every holder (`settle`). The
+      ranking is `xp_balance + claimable`, where claimable is the winning
+      shares and, on cancelled markets, half of all shares not yet paid
+      (from `Bought` / `Sold` / `Claimed` on settled markets); once every
+      market is settled it is 0 for everyone.
    3. Pick `snapshotBlock`; the indexer exports the top 3 among eligible
       wallets (§3.1); admin reviews for sybils.
    4. `closeSeason` (once per season, enforced on chain), send 10 QRL by hand,
       submit the WL wallets to QUANTUMARK.
    5. Only then `startSeason`, which reverts until `closeSeason` has run.
-      `credit` has no season check, so a claim made after the next season
+      `credit` has no season check, so a payout made after the next season
       starts would land in the new season.
 
 ---
